@@ -1,0 +1,9 @@
+menu "TIME TASK Configuration"
+
+    config TIME_FREQUENCY_WARNING
+        int "time frequency"
+        default 10
+        help
+            Set the time between each warning log
+
+endmenu
