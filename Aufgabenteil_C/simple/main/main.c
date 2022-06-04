@@ -247,7 +247,7 @@ static esp_err_t set_duty_post_handler(httpd_req_t *req)
         httpd_resp_send_chunk(req, buf, ret);
         remaining -= ret;
 
-        //check if url parameter is acceptable for led duty cycle
+        //check if parameter is acceptable for duty cycle
         if (atoi(buf) >= 0 && atoi(buf) <= led_max) {
             led_duty = atoi(buf);
 
