@@ -183,7 +183,7 @@ static void httpd_register_basic_auth(httpd_handle_t server)
 #endif
 
 /* An HTTP GET handler */
-static esp_err_t led_get_handler(httpd_req_t *req)
+static esp_err_t led_toggle_get_handler(httpd_req_t *req)
 {
     char*  buf;
     size_t buf_len;
@@ -209,28 +209,6 @@ static esp_err_t led_get_handler(httpd_req_t *req)
         free(buf);
     }
 
-    /* Read URL query string length and allocate memory for length + 1,
-     * extra byte for null termination */
-    buf_len = httpd_req_get_url_query_len(req) + 1;
-    if (buf_len > 1) {
-        buf = malloc(buf_len);
-        if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
-            ESP_LOGI(TAG, "Found URL query => %s", buf);
-            char param[32];
-            /* Get value of expected key from query string */
-            if (httpd_query_key_value(buf, "query1", param, sizeof(param)) == ESP_OK) {
-                ESP_LOGI(TAG, "Found URL query parameter => query1=%s", param);
-            }
-            if (httpd_query_key_value(buf, "query3", param, sizeof(param)) == ESP_OK) {
-                ESP_LOGI(TAG, "Found URL query parameter => query3=%s", param);
-            }
-            if (httpd_query_key_value(buf, "query2", param, sizeof(param)) == ESP_OK) {
-                ESP_LOGI(TAG, "Found URL query parameter => query2=%s", param);
-            }
-        }
-        free(buf);
-    }
-
     /* Send response with custom headers and body set as the
      * string passed in user context*/
     const char* resp_str = (const char*) req->user_ctx;
@@ -239,17 +217,17 @@ static esp_err_t led_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static const httpd_uri_t led = {
-    .uri       = "/led",
+static const httpd_uri_t led_toggle = {
+    .uri       = "/led_toggle",
     .method    = HTTP_GET,
-    .handler   = led_get_handler,
+    .handler   = led_toggle_get_handler,
     /* Let's pass response string in user
      * context to demonstrate it's usage */
-    .user_ctx  = "led value changed"
+    .user_ctx  = "led toggled"
 };
 
 /* An HTTP POST handler */
-static esp_err_t echo_post_handler(httpd_req_t *req)
+static esp_err_t set_duty_post_handler(httpd_req_t *req)
 {
     char buf[100];
     int ret, remaining = req->content_len;
@@ -269,10 +247,24 @@ static esp_err_t echo_post_handler(httpd_req_t *req)
         httpd_resp_send_chunk(req, buf, ret);
         remaining -= ret;
 
-        /* Log data received */
-        ESP_LOGI(TAG, "=========== RECEIVED DATA ==========");
-        ESP_LOGI(TAG, "%.*s", ret, buf);
-        ESP_LOGI(TAG, "====================================");
+        //check if url parameter is acceptable for led duty cycle
+        if (atoi(buf) >= 0 && atoi(buf) <= led_max) {
+            led_duty = atoi(buf);
+
+            /* Log data received */
+            ESP_LOGI(TAG, "=========== RECEIVED DATA ==========");
+            ESP_LOGI(TAG, "duty cycle value: %d",  led_duty);
+            ESP_LOGI(TAG, "====================================");
+
+            // Set duty
+            ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, led_duty));
+            // Update duty to apply the new value
+            ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL));
+        }
+        else {
+            /* Log data received */
+            ESP_LOGI(TAG, "%s", "not a valid value");
+        }
     }
 
     // End response
@@ -280,10 +272,10 @@ static esp_err_t echo_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static const httpd_uri_t echo = {
-    .uri       = "/echo",
+static const httpd_uri_t set_duty = {
+    .uri       = "/set_duty",
     .method    = HTTP_POST,
-    .handler   = echo_post_handler,
+    .handler   = set_duty_post_handler,
     .user_ctx  = NULL
 };
 
@@ -300,16 +292,12 @@ static const httpd_uri_t echo = {
  */
 esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err)
 {
-    if (strcmp("/hello", req->uri) == 0) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "/hello URI is not available");
-        /* Return ESP_OK to keep underlying socket open */
-        return ESP_OK;
-    } else if (strcmp("/echo", req->uri) == 0) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "/echo URI is not available");
+    if (strcmp("/set_duty", req->uri) == 0) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "/set_duty URI is not available");
         /* Return ESP_FAIL to close underlying socket */
         return ESP_FAIL;
-    } else if (strcmp("/test", req->uri) == 0) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "/test URI is not available");
+    } else if (strcmp("/led_toggle", req->uri) == 0) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "/led_toggle URI is not available");
         /* Return ESP_FAIL to close underlying socket */
         return ESP_FAIL;
     }
@@ -329,8 +317,8 @@ static httpd_handle_t start_webserver(void)
     if (httpd_start(&server, &config) == ESP_OK) {
         // Set URI handlers
         ESP_LOGI(TAG, "Registering URI handlers");
-        httpd_register_uri_handler(server, &echo);
-        httpd_register_uri_handler(server, &led);
+        httpd_register_uri_handler(server, &set_duty);
+        httpd_register_uri_handler(server, &led_toggle);
         #if CONFIG_EXAMPLE_BASIC_AUTH
         httpd_register_basic_auth(server);
         #endif
