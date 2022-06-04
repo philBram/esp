@@ -7,6 +7,7 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 
+#include <string.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
 #include <esp_log.h>
@@ -22,9 +23,7 @@
 
 #include "driver/ledc.h"
 
-/* A simple example that demonstrates how to create GET and POST
- * handlers for the web server.
- */
+#include "mdns.h"
 
 #define LEDC_TIMER              LEDC_TIMER_0
 #define LEDC_MODE               LEDC_LOW_SPEED_MODE
@@ -33,10 +32,19 @@
 #define LEDC_DUTY_RES           LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
 #define LEDC_FREQUENCY          (5000) // Frequency in Hertz. Set frequency at 5 kHz
 
+#define EXAMPLE_MDNS_INSTANCE CONFIG_MDNS_INSTANCE
+
+static const char *TAG = "led_api";
+
+static char * generate_hostname(void);
+
+#if CONFIG_MDNS_RESOLVE_TEST_SERVICES == 1
+static void  query_mdns_host_with_gethostbyname(char * host);
+static void  query_mdns_host_with_getaddrinfo(char * host);
+#endif
+
 static int led_duty;
 static int led_max;
-
-static const char *TAG = "example";
 
 static void example_ledc_init(void)
 {
@@ -61,6 +69,56 @@ static void example_ledc_init(void)
         .hpoint         = 0
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+}
+
+static void initialise_mdns(void)
+{
+    char * hostname = generate_hostname();
+
+    //initialize mDNS
+    ESP_ERROR_CHECK( mdns_init() );
+    //set mDNS hostname (required if you want to advertise services)
+    ESP_ERROR_CHECK( mdns_hostname_set(hostname) );
+    ESP_LOGI(TAG, "mdns hostname set to: [%s]", hostname);
+    //set default mDNS instance name
+    ESP_ERROR_CHECK( mdns_instance_name_set(EXAMPLE_MDNS_INSTANCE) );
+
+    //structure with TXT records
+    mdns_txt_item_t serviceTxtData[3] = {
+        {"board", "esp32"},
+        {"u", "user"},
+        {"p", "password"}
+    };
+
+    //initialize service
+    ESP_ERROR_CHECK( mdns_service_add("ESP32-WebServer", "_http", "_tcp", 80, serviceTxtData, 3) );
+#if CONFIG_MDNS_MULTIPLE_INSTANCE
+    ESP_ERROR_CHECK( mdns_service_add("ESP32-WebServer1", "_http", "_tcp", 80, NULL, 0) );
+#endif
+
+#if CONFIG_MDNS_PUBLISH_DELEGATE_HOST
+    char *delegated_hostname;
+    if (-1 == asprintf(&delegated_hostname, "%s-delegated", hostname)) {
+        abort();
+    }
+
+    mdns_ip_addr_t addr4, addr6;
+    esp_netif_str_to_ip4("10.0.0.1", &addr4.addr.u_addr.ip4);
+    addr4.addr.type = ESP_IPADDR_TYPE_V4;
+    esp_netif_str_to_ip6("fd11:22::1", &addr6.addr.u_addr.ip6);
+    addr6.addr.type = ESP_IPADDR_TYPE_V6;
+    addr4.next = &addr6;
+    addr6.next = NULL;
+    ESP_ERROR_CHECK( mdns_delegate_hostname_add(delegated_hostname, &addr4) );
+    ESP_ERROR_CHECK( mdns_service_add_for_host("test0", "_http", "_tcp", delegated_hostname, 1234, serviceTxtData, 3) );
+    free(delegated_hostname);
+#endif // CONFIG_MDNS_PUBLISH_DELEGATE_HOST
+
+    //add another TXT item
+    ESP_ERROR_CHECK( mdns_service_txt_item_set("_http", "_tcp", "path", "/foobar") );
+    //change TXT item value
+    ESP_ERROR_CHECK( mdns_service_txt_item_set_with_explicit_value_len("_http", "_tcp", "u", "admin", strlen("admin")) );
+    free(hostname);
 }
 
 #if CONFIG_EXAMPLE_BASIC_AUTH
@@ -361,14 +419,16 @@ void app_main(void)
 {
     static httpd_handle_t server = NULL;
 
+    ESP_ERROR_CHECK(nvs_flash_init());
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
     led_duty = 0;
     led_max = 8191;
     // Set the LEDC peripheral configuration
     example_ledc_init();
 
-    ESP_ERROR_CHECK(nvs_flash_init());
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    initialise_mdns();
 
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
      * Read "Establishing Wi-Fi or Ethernet Connection" section in
@@ -391,3 +451,63 @@ void app_main(void)
     /* Start the server for the first time */
     server = start_webserver();
 }
+
+/** Generate host name based on sdkconfig, optionally adding a portion of MAC address to it.
+ *  @return host name string allocated from the heap
+ */
+static char* generate_hostname(void)
+{
+#ifndef CONFIG_MDNS_ADD_MAC_TO_HOSTNAME
+    return strdup(CONFIG_MDNS_HOSTNAME);
+#else
+    uint8_t mac[6];
+    char   *hostname;
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (-1 == asprintf(&hostname, "%s-%02X%02X%02X", CONFIG_MDNS_HOSTNAME, mac[3], mac[4], mac[5])) {
+        abort();
+    }
+    return hostname;
+#endif
+}
+
+#if CONFIG_MDNS_RESOLVE_TEST_SERVICES == 1
+/**
+ *  @brief Executes gethostbyname and displays list of resolved addresses.
+ *  Note: This function is used only to test advertised mdns hostnames resolution
+ */
+static void  query_mdns_host_with_gethostbyname(char * host)
+{
+    struct hostent *res = gethostbyname(host);
+    if (res) {
+        unsigned int i = 0;
+        while (res->h_addr_list[i] != NULL) {
+            ESP_LOGI(TAG, "gethostbyname: %s resolved to: %s", host, inet_ntoa(*(struct in_addr *) (res->h_addr_list[i])));
+            i++;
+        }
+    }
+}
+
+/**
+ *  @brief Executes getaddrinfo and displays list of resolved addresses.
+ *  Note: This function is used only to test advertised mdns hostnames resolution
+ */
+static void  query_mdns_host_with_getaddrinfo(char * host)
+{
+    struct addrinfo hints;
+    struct addrinfo * res;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    if (!getaddrinfo(host, NULL, &hints, &res)) {
+        while (res) {
+            ESP_LOGI(TAG, "getaddrinfo: %s resolved to: %s", host,
+                     res->ai_family == AF_INET?
+                     inet_ntoa(((struct sockaddr_in *) res->ai_addr)->sin_addr):
+                     inet_ntoa(((struct sockaddr_in6 *) res->ai_addr)->sin6_addr));
+            res = res->ai_next;
+        }
+    }
+}
+#endif
