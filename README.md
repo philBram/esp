@@ -7,4 +7,5 @@ pinout mapping
 ## Commands for Aufgabenteil_C
 
 curl -X GET -w "\n" [ip]:80/led_toggle
+
 curl -X POST -w "\n" -d [0-8191] [ip]:80/set_duty
