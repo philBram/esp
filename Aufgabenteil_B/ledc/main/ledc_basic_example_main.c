@@ -18,7 +18,6 @@
 #define LEDC_OUTPUT_IO          (5) // Define the output GPIO
 #define LEDC_CHANNEL            LEDC_CHANNEL_0
 #define LEDC_DUTY_RES           LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
-#define LEDC_DUTY               (4095) // Set duty to 50%. ((2 ** 13) - 1) * 50% = 4095
 #define LEDC_FREQUENCY          (5000) // Frequency in Hertz. Set frequency at 5 kHz
 
 static const char* TAG = "MainModule";
@@ -49,30 +48,30 @@ static void example_ledc_init(void)
 }
 
 void vTaskLED(void *pvParameters) {
-    int min_value = 0;
+    int ledc_duty = 0;
     int max_value = (int) pvParameters;
     bool positive = true;
 
     for (;;) {
         // Set duty
-        ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, min_value));
+        ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, ledc_duty));
         // Update duty to apply the new value
         ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL));
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
 
-        positive ? min_value++ : min_value--; 
+        positive ? ledc_duty++ : ledc_duty--; 
 
-        if (positive && (min_value > max_value)) {
+        if (positive && (ledc_duty > max_value)) {
             positive = !positive;
-            min_value--;
+            ledc_duty--;
         }
-        else if (!positive && (min_value < 0)) {
+        else if (!positive && (ledc_duty < 0)) {
             positive = !positive;
-            min_value++;
+            ledc_duty++;
         }
 
-        ESP_LOGI(TAG, "value: %d", min_value);
+        ESP_LOGI(TAG, "value: %d", ledc_duty);
     }
 }
 

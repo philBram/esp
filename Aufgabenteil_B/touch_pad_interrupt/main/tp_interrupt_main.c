@@ -17,6 +17,10 @@
 
 static const char *TAG = "Touch pad";
 
+static int ledc_duty;
+static int const ledc_duty_max = 8191;
+static int ledc_duty_steps = ledc_duty_max / 9;
+
 #define TOUCH_THRESH_NO_USE   (0)
 #define TOUCH_THRESH_PERCENT  (80)
 #define TOUCHPAD_FILTER_TOUCH_PERIOD (10)
@@ -26,7 +30,6 @@ static const char *TAG = "Touch pad";
 #define LEDC_OUTPUT_IO          (5) // Define the output GPIO
 #define LEDC_CHANNEL            LEDC_CHANNEL_0
 #define LEDC_DUTY_RES           LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
-#define LEDC_DUTY               (4095) // Set duty to 50%. ((2 ** 13) - 1) * 50% = 4095
 #define LEDC_FREQUENCY          (5000) // Frequency in Hertz. Set frequency at 5 kHz
 
 static void example_ledc_init(void)
@@ -102,15 +105,6 @@ static void tp_example_read_task(void *pvParameter)
     static int show_message;
     int change_mode = 0;
     int filter_mode = 0;
-
-    int ledc_duty = 0;
-    int const ledc_duty_max = 8191;
-    int ledc_duty_steps = ledc_duty_max / 9;
-
-    // Set duty
-    ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY));
-    // Update duty to apply the new value
-    ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL));
 
     while (1) {
         //toggle led in interrupt mode
@@ -211,6 +205,8 @@ static void tp_example_touch_pad_init(void)
 
 void app_main(void)
 {
+    ledc_duty = 0;
+
     // Initialize touch pad peripheral, it will start a timer to run a filter
     ESP_LOGI(TAG, "Initializing touch pad");
     ESP_ERROR_CHECK(touch_pad_init());
@@ -233,7 +229,7 @@ void app_main(void)
     example_ledc_init();
 
     // Set duty
-    ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY));
+    ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, ledc_duty));
     // Update duty to apply the new value
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, LEDC_CHANNEL));
 
