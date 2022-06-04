@@ -6,4 +6,4 @@ pinout mapping
 
 ## Commands for Aufgabenteil_C
 
-curl -X GET -w "\n" [ip]:80led_toggle
+curl -X GET -w "\n" [ip]:80/led_toggle
